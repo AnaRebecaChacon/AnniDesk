@@ -1,0 +1,7 @@
+.env
+.env.*
+!.env.example
+/vendor/
+/src/storage/logs/*
+!/src/storage/logs/.gitkeep
+.DS_Store

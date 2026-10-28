@@ -1,0 +1,138 @@
+<?php
+declare(strict_types=1);
+
+$isHttps = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
+
+session_set_cookie_params([
+    'httponly' => true,
+    'secure' => $isHttps,
+    'samesite' => 'Lax',
+]);
+
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
+
+if (empty($_SESSION['user']['id'])) {
+    header('Location: /');
+    exit;
+}
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+
+$user = $_SESSION['user'];
+$name = htmlspecialchars($user['full_name'], ENT_QUOTES, 'UTF-8');
+$email = htmlspecialchars($user['email'], ENT_QUOTES, 'UTF-8');
+$roleId = (int) $user['role_id'];
+
+$roles = [
+    1 => 'Solicitante',
+    2 => 'Agente de soporte',
+    3 => 'Supervisor',
+    4 => 'Administrador',
+    5 => 'Auditor de solo lectura',
+];
+
+$role = $roles[$roleId] ?? 'Usuario';
+?>
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Panel principal | HelpDesk</title>
+    <link rel="stylesheet" href="/assets/css/style.css">
+</head>
+<body>
+    <main class="login-container">
+        <section class="login-card dashboard-card">
+
+            <header class="dashboard-header">
+                <div class="dashboard-brand">
+                    <div class="brand-icon" aria-hidden="true">H</div>
+                    <div>
+                        <h1>HelpDesk</h1>
+                        <p class="subtitle">Centro de soporte técnico</p>
+                    </div>
+                </div>
+            </header>
+
+            <div class="dashboard-content">
+                <section class="welcome-section">
+                    <p class="eyebrow">Panel principal</p>
+                    <h2>¡Bienvenida, <?= $name ?>!</h2>
+                    <p>Administra las solicitudes y actividades de soporte desde un solo lugar.</p>
+                </section>
+
+                <h2 class="section-title">Módulos del sistema</h2>
+
+                <div class="module-grid">
+                    
+<a href="/gestion_tickets.php" class="module-card" style="text-decoration: none; color: inherit;">
+    <div class="module-icon" aria-hidden="true">▤</div>
+    <div>
+        <h3>Gestión de tickets</h3>
+        <p>Organiza y da seguimiento a las solicitudes de soporte.</p>
+        <span class="module-status">Abrir módulo</span>
+    </div>
+</a>
+
+
+                    <article class="module-card">
+                        <div class="module-icon green" aria-hidden="true">♙</div>
+                        <div>
+                            <h3>Usuarios y roles</h3>
+                            <p>Consulta las cuentas y administra los permisos del sistema.</p>
+                            <span class="module-status">En preparación</span>
+                        </div>
+                    </article>
+
+                    <article class="module-card">
+                        <div class="module-icon purple" aria-hidden="true">▦</div>
+                        <div>
+                            <h3>Categorías</h3>
+                            <p>Mantén organizados los tipos de solicitudes de soporte.</p>
+                            <span class="module-status">En preparación</span>
+                        </div>
+                    </article>
+
+                    <article class="module-card">
+                        <div class="module-icon orange" aria-hidden="true">☷</div>
+                        <div>
+                            <h3>Historial y auditoría</h3>
+                            <p>Consulta el registro de actividades y cambios.</p>
+                            <span class="module-status">En preparación</span>
+                        </div>
+                    </article>
+                </div>
+
+                <section class="profile-card">
+                    <div class="profile-avatar" aria-hidden="true">A</div>
+                    <div class="profile-info">
+                        <h3><?= $name ?></h3>
+                        <p><?= $email ?></p>
+                    </div>
+                    <span class="role-badge">
+                        <?= htmlspecialchars($role, ENT_QUOTES, 'UTF-8') ?>
+                    </span>
+                </section>
+            </div>
+
+            <footer class="dashboard-footer">
+                <form method="post" action="/logout.php">
+                    <input
+                        type="hidden"
+                        name="csrf_token"
+                        value="<?= htmlspecialchars($_SESSION['csrf_token'], ENT_QUOTES, 'UTF-8') ?>"
+                    >
+                    <button type="submit">Cerrar sesión</button>
+                </form>
+            </footer>
+
+        </section>
+    </main>
+</body>
+</html>
+

@@ -1,0 +1,175 @@
+ANNIDESK - DOCUMENTACIÓN DEL PROYECTO
+=====================================
+
+1. OBJETIVO
+-----------
+AnniDesk es una aplicación PHP para registrar y atender solicitudes de soporte.
+Usa PHP 8.3, Apache y MySQL 8.4 mediante Docker Compose.
+
+2. ESTRUCTURA
+-------------
+src/public/                 Rutas web y recursos públicos.
+src/app/config/             Conexión a MySQL y controles comunes de sesión.
+src/app/controllers/        Inicio de sesión y operaciones de tickets.
+src/app/services/           Reglas de negocio reutilizables.
+src/bin/                    Comandos administrativos ejecutados por consola.
+database/migrations/        Esquema y datos de catálogo para una base nueva.
+src/storage/logs/           Directorio reservado para registros de la aplicación.
+
+3. PREPARAR EL ENTORNO
+----------------------
+1. Copia .env.example como .env.
+2. Cambia DB_PASSWORD y DB_ROOT_PASSWORD por valores aleatorios diferentes.
+   No subas .env a control de versiones ni compartas sus contraseñas.
+3. Inicia los servicios con: docker compose up -d --build
+4. La primera creación del volumen de MySQL ejecuta las migraciones .sql en
+   orden alfabético. Las migraciones de inicio no se ejecutan de nuevo si el
+   volumen mysql_data ya existe.
+5. Si ya hay datos, conserva el volumen. Revisa y aplica cada migración
+   pendiente de forma controlada; no borres mysql_data para forzar su ejecución.
+
+4. CUENTAS INICIALES
+--------------------
+El esquema define cinco roles y estas cuentas iniciales:
+
+Solicitante:            solicitante@anidesk.com
+Agente de soporte:      supportagent@anidesk.com
+Supervisor:             joelsupervisor@anidesk.com
+Administrador:          anitadmin@anidesk.com
+Auditor de solo lectura: vinicioauditor@anidesk.com
+
+Las contraseñas no están guardadas en el código ni en SQL. Para crear las
+cuentas que todavía no existan, ejecuta desde una terminal:
+
+docker compose exec -it web php /var/www/html/bin/create_initial_users.php
+
+El comando solicita cada contraseña sin mostrarla, exige al menos 12 caracteres
+y guarda únicamente su hash. Las cuentas existentes con el rol esperado se
+conservan sin cambios; si una dirección ya existe con otro rol, el comando se
+detiene para evitar alterarla accidentalmente. Los nombres visibles iniciales
+se pueden cambiar desde el módulo Usuarios y roles.
+
+5. ROLES Y PERMISOS
+-------------------
+1 - Solicitante: crea tickets y consulta únicamente los que creó.
+2 - Agente de soporte: consulta y cambia el estado de tickets asignados a su
+    cuenta.
+3 - Supervisor: consulta todos los tickets, cambia estados y consulta historial
+    y categorías en modo de solo lectura.
+4 - Administrador: administra cuentas/roles y categorías, consulta tickets,
+    asigna agentes y revisa historial/auditoría.
+5 - Auditor de solo lectura: consulta tickets, categorías, historial y
+    auditoría general. No puede modificar información.
+
+La aplicación vuelve a comprobar en MySQL que la cuenta siga activa y que el
+rol actual coincida con el de la sesión en cada pantalla protegida.
+
+6. FLUJOS ACTUALES
+------------------
+Inicio de sesión:
+  La página de entrada entrega un token CSRF. login.php valida el token, busca
+  la cuenta activa mediante una consulta preparada y comprueba password_hash.
+  Al autenticar renueva el identificador de sesión y registra el acceso
+  correcto en auditoría.
+
+Creación de ticket:
+  tickets.php carga categorías activas y valida el formulario. TicketController
+  comprueba usuario, título, descripción, categoría y prioridad; crea un número
+  único y guarda la solicitud asociada a la persona autenticada.
+
+Asignación, consulta y cambios:
+  gestion_tickets.php filtra por solicitante o agente asignado, pagina de 50 en
+  50 y muestra el resto de solicitudes solo a supervisor, administrador y
+  auditor. Supervisor y administrador pueden asignar tickets a agentes activos
+  o dejarlos sin asignar. Los cambios requieren CSRF y una validación de
+  permisos dentro del controlador. Cada cambio registra historial y auditoría
+  en una transacción.
+
+Usuarios y roles:
+  usuarios.php permite al administrador crear cuentas, editar datos, cambiar
+  entre los cinco roles definidos, activar/desactivar y establecer una nueva
+  contraseña. Las cuentas no se eliminan para conservar las referencias de
+  auditoría. El sistema impide que una cuenta se quite su propio rol de
+  administrador o desactive a la última persona administradora activa. Las
+  operaciones de cuentas se realizan en transacciones y se auditan.
+
+Categorías:
+  categorias.php permite al administrador crear, modificar y desactivar
+  categorías. Supervisores y auditores pueden consultarlas sin cambios. Las
+  categorías inactivas se conservan para no perder la relación con tickets
+  anteriores; solo categorías activas aparecen en el formulario de creación.
+
+Auditoría:
+  auditoria.php presenta cada evento como una actividad legible y permite
+  filtrar por tipo de operación, usuario o ID del registro. Los tickets y
+  categorías enlazan con su módulo; los cambios de cuenta/categoría nuevos
+  guardan el antes y después. Los inicios y cierres de sesión también se
+  registran. Las direcciones IP solo se muestran a administración.
+
+Conversación e historial:
+  ticket.php presenta el detalle y conversación de un ticket al solicitante
+  dueño, agente asignado, supervisores, administradores y auditores. Solicitantes
+  solo pueden escribir comentarios públicos en sus tickets; agentes asignados,
+  supervisores y administradores pueden escribir comentarios públicos o notas
+  internas. El auditor solo consulta. Las notas internas no son visibles para
+  solicitantes ni auditores. Los tickets cerrados no aceptan nuevos comentarios.
+  historial.php consulta cambios por ticket para supervisor, administrador y
+  auditor. auditoria.php presenta el registro general solo al administrador y
+  auditor; solo el administrador ve las direcciones IP.
+
+Cierre de sesión:
+  logout.php solo acepta POST con token CSRF, elimina los datos de sesión y
+  expira la cookie. Antes registra el cierre de sesión en auditoría.
+
+7. SEGURIDAD IMPLEMENTADA
+-------------------------
+- Contraseñas almacenadas con password_hash y verificadas con password_verify.
+- Consultas SQL parametrizadas y PDO con excepciones y prepares nativos.
+- Cookies HttpOnly, SameSite=Lax y Secure cuando la solicitud usa HTTPS.
+- Regeneración del identificador de sesión al iniciar sesión.
+- Tokens CSRF en formularios de escritura y cierre de sesión.
+- Límite de cinco intentos fallidos por IP; al alcanzarlo, bloquea nuevos
+  intentos durante 15 minutos y elimina registros antiguos de forma gradual.
+- Escape de salida HTML y validación de datos antes de guardar.
+- Separación de tickets por usuario/rol y comprobación de cuenta activa.
+- Cabeceras anti-sniffing, anti-iframe y política de referencia.
+- MySQL solo está en la red privada de Docker; el puerto web se liga a localhost.
+
+En un despliegue público, configura HTTPS en un proxy inverso confiable, copias
+de seguridad cifradas, rotación de contraseñas de la base de datos y monitoreo.
+El límite de intentos usa la IP recibida por el servidor; configura el proxy para
+que el servidor web reporte la dirección real de forma confiable. Recuperación
+de contraseñas y notificaciones son mejoras pendientes; el administrador puede
+definir una nueva contraseña desde el módulo de cuentas.
+
+8. DATOS Y MANTENIMIENTO
+------------------------
+database/migrations/001_schema.sql define roles, usuarios, categorías, tickets,
+comentarios, historial y auditoría. 002_default_categories.sql agrega las
+categorías iniciales sin duplicar las existentes. 003_login_rate_limit.sql
+crea el almacenamiento del límite de intentos de inicio de sesión.
+
+La creación de tickets, cambios de estado, asignaciones y comentarios conservan
+eventos en ticket_history y entradas en audit_logs. Los cambios administrativos
+de cuentas y categorías también se auditan.
+
+Los errores internos se escriben en el log de PHP; no se muestran detalles de
+la base de datos a quien usa el sitio.
+
+9. INTERFAZ DE LOS MÓDULOS
+--------------------------
+Las pantallas autenticadas comparten la navegación de
+src/app/views/layouts/navigation.php y los estilos de
+src/public/assets/css/style.css. La barra muestra solo los módulos permitidos
+para el rol actual; cada ruta también valida permisos en el servidor, por lo
+que ocultar un enlace no reemplaza el control de acceso.
+
+Las páginas de tickets, usuarios, categorías, historial y auditoría usan el
+mismo encabezado, tarjetas, formularios, tablas y avisos. En pantallas pequeñas
+la navegación se desplaza horizontalmente y las tablas conservan su ancho
+legible con desplazamiento propio. El cierre de sesión desde la barra envía
+POST con token CSRF, igual que el del panel.
+
+Los textos compartidos de roles, estados y prioridades se mantienen en
+src/app/views/layouts/helpers.php. La IP remota se valida en una función común
+de src/app/config/security.php antes de guardarse en registros de auditoría.

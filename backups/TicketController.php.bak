@@ -1,0 +1,90 @@
+<?php
+declare(strict_types=1);
+
+require_once __DIR__ . '/../config/database.php';
+
+/**
+ * Crea un ticket para el usuario autenticado.
+ * Devuelve el ID del ticket creado.
+ */
+function createTicket(
+    int $requesterId,
+    string $title,
+    string $description,
+    ?int $categoryId,
+    string $priority
+): int {
+    $title = trim($title);
+    $description = trim($description);
+
+    $allowedPriorities = ['low', 'medium', 'high', 'urgent'];
+
+    if ($requesterId < 1) {
+        throw new InvalidArgumentException('Usuario no válido.');
+    }
+
+    if ($title === '' || mb_strlen($title) > 200) {
+        throw new InvalidArgumentException(
+            'El título es obligatorio y no debe superar los 200 caracteres.'
+        );
+    }
+
+    if ($description === '') {
+        throw new InvalidArgumentException(
+            'La descripción es obligatoria.'
+        );
+    }
+
+    if (!in_array($priority, $allowedPriorities, true)) {
+        throw new InvalidArgumentException('La prioridad no es válida.');
+    }
+
+    $pdo = getDatabaseConnection();
+
+    // Confirmar que el usuario exista y esté activo.
+    $userStmt = $pdo->prepare(
+        'SELECT id FROM users WHERE id = :id AND is_active = 1'
+    );
+    $userStmt->execute(['id' => $requesterId]);
+
+    if (!$userStmt->fetch()) {
+        throw new RuntimeException('El usuario no existe o está inactivo.');
+    }
+
+    // Verificar la categoría cuando se ha seleccionado una.
+    if ($categoryId !== null) {
+        $categoryStmt = $pdo->prepare(
+            'SELECT id FROM categories WHERE id = :id AND is_active = 1'
+        );
+        $categoryStmt->execute(['id' => $categoryId]);
+
+        if (!$categoryStmt->fetch()) {
+            throw new InvalidArgumentException(
+                'La categoría seleccionada no existe o está inactiva.'
+            );
+        }
+    }
+
+    $ticketNumber = 'HD-' . date('Ymd') . '-' .
+        strtoupper(bin2hex(random_bytes(4)));
+
+    $stmt = $pdo->prepare(
+        'INSERT INTO tickets
+            (ticket_number, requester_id, category_id, title, description, priority)
+         VALUES
+            (:ticket_number, :requester_id, :category_id, :title, :description, :priority)'
+    );
+
+    $stmt->execute([
+        'ticket_number' => $ticketNumber,
+        'requester_id' => $requesterId,
+        'category_id' => $categoryId,
+        'title' => $title,
+        'description' => $description,
+        'priority' => $priority,
+    ]);
+
+    return (int) $pdo->lastInsertId();
+}
+
+
